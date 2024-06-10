@@ -1,0 +1,102 @@
+name: uncomplicated-vm-tools
+version: '0.1'
+summary: "Uncomplicated VM Tools (uvt)"
+description: |
+  uvt is essentially a wrapper script for virsh and virt-install for both 
+  making VM creation repeatable and to help batch commands to multiple VMs. 
+
+  IMPORTANT: **This snap should not be used by the general audience**. 
+  VMs created by uvt use intrinsically insecure configurations and uvt code 
+  is not checked for vulnerabilities. Thus, general use of uvt may pose a 
+  security risk for your system and should be avoided by all means. uvt is 
+  only intended to be used by the Ubuntu Security team to generate ephemeral 
+  environments to test security patches in a consistent way.
+confinement: strict
+grade: stable
+base: core22
+
+layout:
+  # Layouts are required by virt-install to work
+  /usr/lib/x86_64-linux-gnu/girepository-1.0:
+    bind: $SNAP/usr/lib/x86_64-linux-gnu/girepository-1.0
+  /usr/share/misc:
+    bind: $SNAP/usr/share/misc
+  /var/lib/usbutils:
+    bind: $SNAP/var/lib/usbutils
+
+  # Address resolution
+  /etc/nsswitch.conf:
+    bind-file: $SNAP_COMMON/etc/nsswitch.conf
+  /var/lib/libvirt:
+    bind: $SNAP_COMMON/var/lib/libvirt
+
+parts:
+  uvt:
+    plugin: python
+    source-type: git
+    source: https://git.launchpad.net/ubuntu-qa-tools
+    source-subdir: vm-tools
+    stage-packages:
+    - cpu-checker                   # kvm-ok
+    - genisoimage                   # create iso
+    - xorriso                       # extract iso
+    - whois
+    - cpio
+    - gzip
+    - qemu-utils                    # qemu-img
+    - util-linux                    # setsid
+    - virtinst                      # virt-install
+    - virt-viewer                   # virt-viewer
+    - libvirt-clients               # virsh
+    - libnss-libvirt                # network address resolution
+    - libyajl2                      # network address resolution
+    - acl                           # setfacl: enable libvirt-qemu user to access required folders
+    - python3-lxml
+    - python3-distro-info
+    - gpg                           # export public gpg key
+    - openssh-client                # ssh connections
+    override-pull: |
+      snapcraftctl pull
+      cp $CRAFT_PART_SRC_WORK/uvt $SNAPCRAFT_PRIME
+      cp $CRAFT_PART_SRC_WORK/uvt-completion.bash $SNAPCRAFT_PRIME
+      
+      # Wrap virsh to use setsid  
+      mkdir -p $SNAPCRAFT_PRIME/usr/local/bin
+      cat > $SNAPCRAFT_PRIME/usr/local/bin/virsh << "EOF"
+      #!/bin/bash  
+      setsid --wait $SNAP/usr/bin/virsh "$@"
+      EOF
+      chmod +x $SNAPCRAFT_PRIME/usr/local/bin/virsh
+
+apps:
+  uvt:
+    command: "bin/python3 $SNAP/uvt"
+    completer: "uvt-completion.bash"
+    plugs:
+    - home
+    - network
+    - libvirt                       # everything
+    - x11                           # uvt view
+    - gpg-public-keys               # uvt new / uvt repo (to add gpg key to vm)
+    - ssh-keys                      # Don't autoconnect, only compat mode
+    - dot-uvt-dot-conf              # Don't autoconnect, only compat mode
+    environment:
+      PATH: "$SNAP/usr/local/sbin:$SNAP/usr/local/bin:$PATH"
+      PYTHONPATH: "/usr/lib/python3/dist-packages:$SNAP/usr/lib/python3/dist-packages:$SNAP/lib/python3.10/site-packages:$SNAP/usr/share/virt-manager"
+
+plugs:
+  # Only for compat mode
+  dot-uvt-dot-conf:
+    interface: personal-files
+    read:
+    - $HOME/.uvt.conf
+    
+  dot-cache-virt-manager-virt-install-dot-log:
+    interface: personal-files
+    write:
+    - $HOME/.cache/virt-manager/virt-install.log
+
+  dot-config-virt-viewer-settings:
+    interface: personal-files
+    read:
+    - $HOME/.config/virt-viewer/settings
